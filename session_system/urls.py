@@ -4,5 +4,6 @@ from . import views
 
 urlpatterns = [
     # Define your URL patterns here
-    path('session/', views.SessionView.as_view(), name='session-create'),
+    path('session/', views.create_session, name='session-create'),
+    path('session/<uuid:uuid>/', views.update_session, name='update-session'),
 ]
