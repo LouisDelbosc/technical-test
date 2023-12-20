@@ -1,13 +1,46 @@
 from django.views import View
 from django.http import JsonResponse
+from django.utils import timezone
+from datetime import timedelta
 import json
 
 from session_system.token_authentication_middleware import token_auth
 from .models import User, Device, Session
 
 
-# Create your views here.
-# @token_auth
+def session_serializer(session):
+    device_data = {
+        "uuid": str(session.device),
+        "type": session.device.type,
+    }
+
+    # Conditionally add 'vendor_uuid' if device type is 'mobi'
+    if session.device.type == "mobi":
+        device_data["vendor_uuid"] = str(session.device.vendor_uuid)
+
+    return {
+        "uuid": str(session),
+        "token": session.token,
+        "status": session.status,
+        "is_new_user": session.is_new_user,
+        "is_new_device": session.is_new_device,
+        "user": {
+            "uuid": str(session.user),
+            "email": session.user.email,
+        },
+        "device": device_data,
+    }
+
+
+def get_alive_session(user, device):
+    session = Session.objects.filter(user=user, device=device).latest("created_at")
+    if device.type == "mobi":
+        return session
+    if timezone.now() - session.created_at > timedelta(hours=2):
+        session.status = "expired"
+        session.save()
+        raise Session.DoesNotExist
+    return session
 
 
 class SessionView(View):
@@ -16,37 +49,32 @@ class SessionView(View):
             data = json.loads(request.body)
             user_email = data.get("user", {}).get("email")
             device_type = data.get("device", {}).get("type")
+            device_vendor = data.get("device", {}).get("vendor_uuid")
 
-            if not user_email or not device_type:
+            if (
+                not user_email
+                or not device_type
+                or (device_type == "mobi" and not device_vendor)
+            ):
                 return JsonResponse({"error": "Invalid data"}, status=400)
             user, user_created = User.objects.get_or_create(email=user_email)
             device, device_created = Device.objects.get_or_create(
-                user=user, type=device_type
+                user=user, type=device_type, vendor_uuid=device_vendor
             )
 
             # Create a new Session
-            session = Session.objects.create(
-                user=user,
-                device=device,
-                is_new_user=user_created,
-                is_new_device=device_created,
-            )
-            print(f"OTP CODE: {session.otp_code}")
-            return JsonResponse(
-                {
-                    "uuid": str(session),
-                    "token": session.token,
-                    "status": session.status,
-                    "user": {
-                        "uuid": str(user),
-                        "email": user.email,
-                    },
-                    "device": {
-                        "uuid": str(device),
-                        "type": device.type,
-                    },
-                },
-                status=201,
-            )
+            try:
+                session = get_alive_session(user, device)
+                print(f"OTP CODE: {session.otp_code}")
+                return JsonResponse(session_serializer(session), status=200)
+            except Session.DoesNotExist:
+                session = Session.objects.create(
+                    user=user,
+                    device=device,
+                    is_new_user=user_created,
+                    is_new_device=device_created,
+                )
+                print(f"OTP CODE: {session.otp_code}")
+                return JsonResponse(session_serializer(session), status=201)
         except json.JSONDecodeError:
             return JsonResponse({"error": "Invalid JSON"}, status=400)
