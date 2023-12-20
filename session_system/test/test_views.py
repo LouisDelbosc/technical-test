@@ -108,8 +108,12 @@ class UpdateSessionViewTestCase(TestCase):
 
     def test_patch_session(self):
         data = {"otp_code": "123456"}
+        auth_header = {"HTTP_AUTHORIZATION": f"Bearer {self.session.token}"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/", data, content_type="application/json"
+            f"/session/{self.session.uuid}/",
+            data,
+            content_type="application/json",
+            **auth_header,
         )
 
         self.session.refresh_from_db()
@@ -135,13 +139,30 @@ class UpdateSessionViewTestCase(TestCase):
 
     def test_patch_session__wrong_otp_code(self):
         data = {"otp_code": "123455"}
+        auth_header = {"HTTP_AUTHORIZATION": f"Bearer {self.session.token}"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/", data, content_type="application/json"
+            f"/session/{self.session.uuid}/",
+            data,
+            content_type="application/json",
+            **auth_header,
         )
 
         self.assertEqual(response.status_code, 400)
         self.session.refresh_from_db()
         self.assertEqual(self.session.status, "pending")
+
+    def test_patch_session__no_headers(self):
+        data = {"otp_code": "123456"}
+        response = self.client.patch(
+            f"/session/{self.session.uuid}/",
+            data,
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, "pending")
+        self.assertEqual(response.json(), {"error": "Unauthorized"})
 
     def test_patch_session__expired_session(self):
         expired_date = timezone.make_aware(datetime.datetime(2023, 12, 19))
@@ -149,8 +170,12 @@ class UpdateSessionViewTestCase(TestCase):
         self.session.save()
         data = {"otp_code": "123456"}
 
+        auth_header = {"HTTP_AUTHORIZATION": f"Bearer {self.session.token}"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/", data, content_type="application/json"
+            f"/session/{self.session.uuid}/",
+            data,
+            content_type="application/json",
+            **auth_header,
         )
 
         self.assertEqual(response.status_code, 401)

@@ -13,11 +13,10 @@ class TokenAuthenticationMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        response = self.get_response(request)
         # Check if the view is marked to bypass token authentication
         view = resolve(request.path_info).func
         if not getattr(view, "token_auth", False):
-            return response
+            return self.get_response(request)
 
         authorization_header = request.headers.get("Authorization")
         if authorization_header:
