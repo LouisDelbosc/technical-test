@@ -1,12 +1,15 @@
 from django.http import JsonResponse
 from django.urls import resolve
 from .models import Session
+import logging
 
 
 def token_auth(view_func):
     view_func.token_auth = True
     return view_func
 
+
+logger = logging.getLogger(__name__)
 
 class TokenAuthenticationMiddleware:
     def __init__(self, get_response):
@@ -26,6 +29,6 @@ class TokenAuthenticationMiddleware:
                 token = parts[1]
                 session = Session.objects.filter(token=token).first()
                 if session and session.user:
-                    request.user = session.user
+                    request.session = session
                     return self.get_response(request)
         return JsonResponse({"error": "Unauthorized"}, status=401)

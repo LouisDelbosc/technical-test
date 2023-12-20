@@ -110,7 +110,7 @@ class UpdateSessionViewTestCase(TestCase):
         data = {"otp_code": "123456"}
         auth_header = {"HTTP_AUTHORIZATION": f"Bearer {self.session.token}"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/",
+            f"/session/ses-{self.session.uuid}/",
             data,
             content_type="application/json",
             **auth_header,
@@ -141,7 +141,7 @@ class UpdateSessionViewTestCase(TestCase):
         data = {"otp_code": "123455"}
         auth_header = {"HTTP_AUTHORIZATION": f"Bearer {self.session.token}"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/",
+            f"/session/ses-{self.session.uuid}/",
             data,
             content_type="application/json",
             **auth_header,
@@ -154,7 +154,7 @@ class UpdateSessionViewTestCase(TestCase):
     def test_patch_session__no_headers(self):
         data = {"otp_code": "123456"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/",
+            f"/session/ses-{self.session.uuid}/",
             data,
             content_type="application/json",
         )
@@ -172,7 +172,7 @@ class UpdateSessionViewTestCase(TestCase):
 
         auth_header = {"HTTP_AUTHORIZATION": f"Bearer {self.session.token}"}
         response = self.client.patch(
-            f"/session/{self.session.uuid}/",
+            f"/session/ses-{self.session.uuid}/",
             data,
             content_type="application/json",
             **auth_header,
@@ -181,3 +181,99 @@ class UpdateSessionViewTestCase(TestCase):
         self.assertEqual(response.status_code, 401)
         self.session.refresh_from_db()
         self.assertEqual(self.session.status, "expired")
+
+    def test_patch_session__full_way_othr(self):
+        # create othr session
+        data = {"user": {"email": "test@test.com"}, "device": {"type": "othr"}}
+        response = self.client.post("/session/", data, content_type="application/json")
+
+        json = response.json()
+        session = Session.objects.filter(user__email="test@test.com").first()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(session.status, "pending")
+        
+        # confirm othr session
+        auth_header = {"HTTP_AUTHORIZATION": f"Bearer {json["token"]}"}
+        response = self.client.patch(
+            f"/session/{json["uuid"]}/",
+            data={"otp_code": session.otp_code},
+            content_type="application/json",
+            **auth_header,
+        )
+        self.assertEqual(response.status_code, 200)
+        session.refresh_from_db()
+        self.assertEqual(session.status, "confirmed")
+
+        # confirm we fetch the already created session
+        response = self.client.post("/session/", data, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'confirmed')
+
+    def test_patch_session__full_way_othr_expired_session(self):
+        # created othr session
+        data = {"user": {"email": "test@test.com"}, "device": {"type": "othr"}}
+        response = self.client.post("/session/", data, content_type="application/json")
+
+        json = response.json()
+        session = Session.objects.filter(user__email="test@test.com").first()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(session.status, "pending")
+        
+        # confirm othr session
+        auth_header = {"HTTP_AUTHORIZATION": f"Bearer {json["token"]}"}
+        response = self.client.patch(
+            f"/session/{json["uuid"]}/",
+            data={"otp_code": session.otp_code},
+            content_type="application/json",
+            **auth_header,
+        )
+        self.assertEqual(response.status_code, 200)
+        session.refresh_from_db()
+        self.assertEqual(session.status, "confirmed")
+
+        # check othr session is expired
+        expired_date = timezone.make_aware(datetime.datetime(2023, 12, 19))
+        session.created_at = expired_date
+        session.save()
+        response = self.client.post("/session/", data, content_type="application/json")
+        session.refresh_from_db()
+        self.assertEqual(session.status, 'expired')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['status'], 'pending')
+
+    def test_patch_session__full_way_mobi(self):
+        # create a mobi session
+        data = {
+            "user": {"email": "test@test.com"},
+            "device": {
+                "type": "mobi",
+                "vendor_uuid": "20354d7a-e4fe-47af-8ff6-187bca92f3f9",
+            },
+        }
+        response = self.client.post("/session/", data, content_type="application/json")
+
+        # check mobi session is created
+        json = response.json()
+        session = Session.objects.filter(user__email="test@test.com").first()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(session.status, "pending")
+
+        # confirm mobi session
+        auth_header = {"HTTP_AUTHORIZATION": f"Bearer {json["token"]}"}
+        response = self.client.patch(
+            f"/session/{json["uuid"]}/",
+            data={"otp_code": session.otp_code},
+            content_type="application/json",
+            **auth_header,
+        )
+        self.assertEqual(response.status_code, 200)
+        session.refresh_from_db()
+        self.assertEqual(session.status, "confirmed")
+
+        # check mobi session doesn't expire
+        expired_date = timezone.make_aware(datetime.datetime(2023, 12, 19))
+        session.created_at = expired_date
+        session.save()
+        response = self.client.post("/session/", data, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'confirmed')
